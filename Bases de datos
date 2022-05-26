@@ -1,0 +1,554 @@
+drop table if exists ciudad cascade;
+drop table if exists transportadora cascade;
+drop table if exists red_conocimiento cascade;
+drop table if exists material cascade;
+drop table if exists tipo_producto cascade;
+drop table if exists proveedor cascade;
+drop table if exists cliente cascade;
+drop table if exists producto cascade;
+drop table if exists ingreso_producto cascade;
+drop table if exists factura cascade;
+drop table if exists datos_envio cascade;
+drop table if exists numero_pedidos cascade;
+
+create table ciudad(
+	id_ciudad integer primary key,
+	nombre_ciudad varchar(30) not null
+);
+
+create table transportadora(
+	id_transportadora integer primary key,
+	nombre_transportadora varchar(30) not null
+);
+
+create table red_conocimiento(
+	id_red integer primary key,
+	nombre_red varchar(30) not null
+);
+
+create table material(
+	id_material integer primary key,
+	nombre_material varchar(40) not null,
+	color varchar(15) 
+);
+
+create table tipo_producto(
+	id_tipo integer primary key,
+	nombre_tipo varchar(30) not null
+);
+
+create table proveedor(
+	id_proveedor integer primary key,
+	nombre_proveedor varchar(30),
+	producto varchar(20)
+);
+
+create table cliente(
+	id_cliente integer primary key,
+	nombre varchar(40)not null,
+	direccion varchar(40),
+	telefono char(10),
+	fecha_nacimiento date,
+	id_ciudad integer,
+	id_red integer,
+	FOREIGN Key (id_ciudad) REFERENCES ciudad(id_ciudad),
+	FOREIGN Key (id_red) REFERENCES red_conocimiento(id_red)
+);
+
+create table ingreso_producto(
+	id_producto integer primary key,
+	id_tipo integer,
+	cantidad integer,
+	precio_unitario integer,
+	precio_total integer,
+	precio_venta integer,
+	fecha date,
+	id_proveedor integer,
+	diseño_producto varchar(65), 
+	id_material integer,
+	FOREIGN Key (id_material) REFERENCES material(id_material),
+	FOREIGN Key (id_tipo) REFERENCES tipo_producto(id_tipo),
+	FOREIGN Key (id_proveedor) REFERENCES proveedor(id_proveedor)
+);
+
+create table producto(
+	id_producto integer primary key,
+	id_tipo integer,
+	precio integer,
+	existencias integer,
+	diseño_producto varchar(65),
+	id_material integer,
+	FOREIGN Key (id_tipo) REFERENCES tipo_producto(id_tipo),
+	FOREIGN Key (id_producto) REFERENCES ingreso_producto(id_producto),
+	FOREIGN Key (id_material) REFERENCES material(id_material)
+);
+
+create table factura(
+	id_factura integer primary key,
+	id_producto integer,
+	id_cliente integer,
+	unidades integer,
+	precio_envio integer,
+	precio_total integer,
+	fecha date,
+	FOREIGN Key (id_producto) REFERENCES producto(id_producto),
+	FOREIGN Key (id_cliente) REFERENCES cliente(id_cliente)
+);
+
+create table datos_envio(
+	id_cliente integer,
+	id_factura integer,
+	id_transportadora integer,
+	FOREIGN Key (id_cliente) REFERENCES cliente(id_cliente),
+	FOREIGN Key (id_factura) REFERENCES factura(id_factura),
+	FOREIGN Key (id_transportadora) REFERENCES transportadora(id_transportadora)
+);
+
+create table numero_pedidos(
+	id_cliente integer,
+	numero_pedidos integer,
+	FOREIGN Key (id_cliente) REFERENCES cliente(id_cliente)
+);
+
+------------------------------------------
+--Triggers
+------------------------------------------
+--Aumentar las existencias cuando se ingresen nuevos productos en ingreso producto
+CREATE OR REPLACE FUNCTION aumentar_existencias()
+RETURNS trigger
+AS
+$$
+BEGIN
+	IF EXISTS (SELECT * FROM producto p WHERE p.id_producto = NEW.id_producto) THEN
+		UPDATE producto
+		SET existencias = existencias + NEW.cantidad
+		WHERE id_producto = NEW.id_producto;
+	ELSE
+		INSERT INTO producto(id_producto,id_tipo,precio,existencias,diseño_producto) VALUES (NEW.id_producto, NEW.id_tipo, NEW.precio_unitario + (NEW.precio_unitario / 2),NEW.cantidad,NEW.diseño_producto);
+		END IF;
+	RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE TRIGGER nuevos_ingresos AFTER INSERT ON ingreso_producto 
+FOR EACH ROW 
+EXECUTE FUNCTION aumentar_existencias();
+
+--Iniciar a cliente con pedidos 0
+
+CREATE OR REPLACE FUNCTION iniciar_pedidos()
+RETURNS trigger
+AS
+$$
+BEGIN
+		INSERT INTO numero_pedidos VALUES (NEW.id_cliente, 0);
+	RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE TRIGGER iniciar_pedidos_0 AFTER INSERT ON cliente 
+FOR EACH ROW 
+EXECUTE FUNCTION iniciar_pedidos();
+
+
+--Restar las existencias de los productos cuando alguno es vendido
+
+CREATE OR REPLACE FUNCTION restar_existencias()
+RETURNS trigger
+AS
+$$
+BEGIN
+	IF EXISTS (SELECT * FROM producto p WHERE p.id_producto = NEW.id_producto) THEN
+		UPDATE producto
+		SET existencias = existencias - NEW.unidades
+		WHERE id_producto = NEW.id_producto;
+	ELSE
+		RAISE EXCEPTION 'El id de producto no existe %', new.id_producto 
+        USING HINT = 'Check the id again';
+		END IF;
+	RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE TRIGGER ventas AFTER INSERT ON factura 
+FOR EACH ROW 
+EXECUTE FUNCTION restar_existencias();
+
+--Aumentar el numero de pedidos cada vez que el cliente compre
+
+CREATE OR REPLACE FUNCTION total_pedidos()
+RETURNS trigger
+AS
+$$
+BEGIN
+	IF EXISTS (SELECT * FROM numero_pedidos cp WHERE cp.id_cliente = NEW.id_cliente) THEN
+		UPDATE numero_pedidos
+		SET numero_pedidos = numero_pedidos + 1
+		WHERE numero_pedidos.id_cliente = NEW.id_cliente;
+	ELSE
+		INSERT INTO numero_pedidos VALUES (NEW.id_cliente, 1);
+		END IF;
+	RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE TRIGGER total_pedidos_tr AFTER INSERT ON factura 
+FOR EACH ROW 
+EXECUTE FUNCTION total_pedidos();
+
+------------------------------------------
+--Inserciones
+------------------------------------------
+
+--Transportadora
+
+INSERT INTO transportadora values(001,'Coordinadora');
+INSERT INTO transportadora values(002,'Interrapidisimo');
+INSERT INTO transportadora values(003,'Envía');
+INSERT INTO transportadora values(004,'Servientrega');
+INSERT INTO transportadora values(005,'Transportadora Local');
+
+--Red de conocimiento
+
+INSERT INTO red_conocimiento values(001,'Whatsapp');
+INSERT INTO red_conocimiento values(002,'Instagram');
+INSERT INTO red_conocimiento values(003,'Otro');
+
+--Proveedor
+
+INSERT INTO proveedor values(001,'Lina Accesorios');
+INSERT INTO proveedor values(002,'Envigado Accesorios');
+INSERT INTO proveedor values(003,'VC Accesorios');
+
+--Ciudad
+
+INSERT INTO ciudad values(001,'Armenia');
+INSERT INTO ciudad values(002,'Barranquilla');
+INSERT INTO ciudad values(003,'Bogotá');
+INSERT INTO ciudad values(004,'Bucaramanga');
+INSERT INTO ciudad values(005,'Cali');
+INSERT INTO ciudad values(006,'Cartagena');
+INSERT INTO ciudad values(007,'Cúcuta');
+INSERT INTO ciudad values(008,'Ibagué');
+INSERT INTO ciudad values(009,'Manizales');
+INSERT INTO ciudad values(010,'Medellín');
+INSERT INTO ciudad values(011,'Pereira');
+INSERT INTO ciudad values(012,'Santa Marta');
+INSERT INTO ciudad values(013,'Villavicencio');
+
+--Material
+
+INSERT INTO material values(001, 'Covergold', 'Dorado');
+INSERT INTO material values(002, 'Covergold', 'Oro Rosa');
+INSERT INTO material values(003, 'Rodio', 'Plateado');
+INSERT INTO material values(004, 'Rodio', 'Negro');
+INSERT INTO material values(005, 'Acero Inoxidable', 'Dorado');
+INSERT INTO material values(006, 'Goldfilled', 'Dorado');
+INSERT INTO material values(007, 'Covergold', 'Negro');
+
+--Tipo de Producto
+
+INSERT INTO tipo_producto values(001, 'Candonga');
+INSERT INTO tipo_producto values(002, 'Topo');
+INSERT INTO tipo_producto values(003, 'Anillo');
+INSERT INTO tipo_producto values(004, 'Pulsera');
+INSERT INTO tipo_producto values(005, 'Tobillera');
+INSERT INTO tipo_producto values(006, 'Collar');
+INSERT INTO tipo_producto values(007, 'Cuelga gafas');
+
+--Ingreso Producto
+
+INSERT INTO ingreso_producto values(1,4,4,12500,50000,18750,'2020-07-01',1,'Circones azules',1);
+INSERT INTO ingreso_producto values(2,4,4,10000,40000,15000,'2020-07-01',1,'Microcircones',1);
+INSERT INTO ingreso_producto values(3,4,4,9000,36000,13500,'2020-07-01',1,'Microcircones azules',1);
+INSERT INTO ingreso_producto values(4,5,4,10000,40000,15000,'2020-07-01',1,'Dijes de estrella',1);
+INSERT INTO ingreso_producto values(5,5,4,9000,36000,13500,'2020-08-01',2,'Dijes de figuras',1);
+INSERT INTO ingreso_producto values(6,6,4,12500,50000,18750,'2020-09-30',1,'Dije de microcircones',1);
+INSERT INTO ingreso_producto values(7,6,4,12500,50000,18750,'2020-09-30',1,'Dije de microcircones en forma de cruz',1);
+INSERT INTO ingreso_producto values(8,6,4,12500,50000,18750,'2020-10-30',2,'Dije de microcircones en forma de cruz',1);
+INSERT INTO ingreso_producto values(9,6,4,10000,40000,15000,'2020-10-30',2,'Tejido plano',1);
+INSERT INTO ingreso_producto values(10,6,4,16000,64000,24000,'2020-10-30',1,'Tejido plano grueso',1);
+INSERT INTO ingreso_producto values(11,6,4,8000,32000,12000,'2020-11-08',2,'Dije en forma de estrella',1);
+INSERT INTO ingreso_producto values(12,6,4,12000,48000,18000,'2020-11-08',1,'Dije de cubo',1);
+INSERT INTO ingreso_producto values(13,6,4,15000,60000,22500,'2020-11-08',1,'Dije de arbol de la vida',1);
+INSERT INTO ingreso_producto values(14,6,4,12000,48000,18000,'2020-12-01',1,'Dije de corazon',6);
+INSERT INTO ingreso_producto values(15,6,4,11000,44000,16500,'2020-12-01',1,'Dije de infinito',6);
+INSERT INTO ingreso_producto values(16,6,4,10000,40000,15000,'2020-12-01',3,'Dije 11:11',6);
+INSERT INTO ingreso_producto values(17,6,4,13000,52000,19500,'2020-12-01',3,'Dije de luna y estrella',1);
+INSERT INTO ingreso_producto values(18,6,4,12000,48000,18000,'2021-01-05',1,'Dije de luna',6);
+INSERT INTO ingreso_producto values(19,6,4,12000,48000,18000,'2021-01-05',1,'Circones dorados',1);
+INSERT INTO ingreso_producto values(20,6,4,11000,44000,16500,'2021-01-05',1,'Dije letra A',1);
+INSERT INTO ingreso_producto values(21,6,4,11000,44000,16500,'2021-01-05',3,'Dije letra F',1);
+INSERT INTO ingreso_producto values(22,6,4,11000,44000,16500,'2021-01-05',3,'Dije letra V',1);
+INSERT INTO ingreso_producto values(23,1,4,4000,16000,6000,'2021-03-08',2,'Candongas estrella',3);
+INSERT INTO ingreso_producto values(24,1,4,13000,52000,19500,'2021-03-08',2,'SetX3',1);
+INSERT INTO ingreso_producto values(25,1,4,7000,28000,10500,'2021-03-08',2,'Candongas Corazon',1);
+INSERT INTO ingreso_producto values(26,1,4,8000,32000,12000,'2021-04-08',1,'Candongas Sencillas',1);
+INSERT INTO ingreso_producto values(27,1,4,4000,16000,6000,'2021-04-08',1,'Mini Hoops',7);
+INSERT INTO ingreso_producto values(28,1,4,7500,30000,11250,'2021-04-08',1,'Mini Hoops',1);
+INSERT INTO ingreso_producto values(29,1,4,9000,36000,13500,'2021-04-08',3,'Mini Hoops',2);
+INSERT INTO ingreso_producto values(30,1,4,14000,56000,21000,'2021-05-01',1,'Pendientes Perla',2);
+INSERT INTO ingreso_producto values(31,1,4,12000,48000,18000,'2021-05-01',1,'Pendientes Ojo',1);
+INSERT INTO ingreso_producto values(32,1,4,12000,48000,18000,'2021-05-01',1,'Pendientes Flor',1);
+INSERT INTO ingreso_producto values(33,1,4,11000,44000,16500,'2021-05-01',2,'Candonga con estampado 1',1);
+INSERT INTO ingreso_producto values(34,1,4,10000,40000,15000,'2021-05-01',2,'Candonga Pajarito',1);
+INSERT INTO ingreso_producto values(35,1,4,12000,48000,18000,'2021-06-10',3,'Candonga con estampado 2',1);
+INSERT INTO ingreso_producto values(36,1,4,8000,32000,12000,'2021-06-10',3,'Candonga Trenzada',1);
+INSERT INTO ingreso_producto values(37,1,4,8000,32000,12000,'2021-06-10',3,'Candonga Lisas Pequeñas',1);
+INSERT INTO ingreso_producto values(38,1,4,10000,40000,15000,'2021-06-10',2,'Candonga dije de estrella',1);
+INSERT INTO ingreso_producto values(39,1,4,18000,72000,27000,'2021-07-02',1,'Candongas lisas Grandes',1);
+INSERT INTO ingreso_producto values(40,1,4,18000,72000,27000,'2021-08-02',1,'Candongas lisas Gruesas Grandes',1);
+INSERT INTO ingreso_producto values(41,1,4,9000,36000,13500,'2021-08-02',1,'Candongas lisas Gruesas Pequeñas',1);
+INSERT INTO ingreso_producto values(42,1,4,15000,60000,22500,'2021-08-02',2,'Candongas lisas Medianas',1);
+INSERT INTO ingreso_producto values(43,3,4,6000,24000,9000,'2021-09-05',2,'Anillo trenzado',1);
+INSERT INTO ingreso_producto values(44,3,4,7500,30000,11250,'2021-09-05',3,'Anillo Microcircones',1);
+INSERT INTO ingreso_producto values(45,3,4,7000,28000,10500,'2021-09-05',3,'Anillo Microcircones 2',1);
+INSERT INTO ingreso_producto values(46,3,4,6000,24000,9000,'2021-10-03',1,'Anillo Triangulo',1);
+INSERT INTO ingreso_producto values(47,3,4,8000,32000,12000,'2021-10-03',1,'Anillo Sirena',1);
+INSERT INTO ingreso_producto values(48,3,4,8000,32000,12000,'2021-10-03',1,'Anillo Moñito',1);
+INSERT INTO ingreso_producto values(49,3,4,8000,32000,12000,'2021-11-14',2,'Anillo Cruces',1);
+INSERT INTO ingreso_producto values(50,3,4,8000,32000,12000,'2021-11-14',2,'Anillo Hojitas',1);
+INSERT INTO ingreso_producto values(51,3,4,8000,32000,12000,'2021-12-04',1,'Anillo Estrella y Luna',1);
+INSERT INTO ingreso_producto values(52,3,4,8000,32000,12000,'2021-12-04',1,'Anillo Cruzado',1);
+INSERT INTO ingreso_producto values(53,3,4,8000,32000,12000,'2021-12-04',1,'Anillo Hojas',1);
+INSERT INTO ingreso_producto values(54,2,4,9000,36000,13500,'2021-12-04',1,'Earrings Hojas',1);
+INSERT INTO ingreso_producto values(55,2,4,2000,8000,3000,'2022-01-13',3,'Topo Sencillo',1);
+INSERT INTO ingreso_producto values(56,2,4,3000,12000,4500,'2022-01-13',2,'Topo Paleta',3);
+INSERT INTO ingreso_producto values(57,2,4,5000,20000,7500,'2022-01-13',2,'Topo Serpiente',1);
+INSERT INTO ingreso_producto values(58,2,4,7500,30000,11250,'2022-01-13',2,'SetX3 Luna',5);
+INSERT INTO ingreso_producto values(59,2,4,3000,12000,4500,'2022-02-22',1,'Topo Alas de Angel',1);
+INSERT INTO ingreso_producto values(60,2,4,3000,12000,4500,'2022-02-22',1,'Topo Planeta',1);
+INSERT INTO ingreso_producto values(61,2,4,3000,12000,4500,'2022-02-22',1,'Topo Luna',1);
+INSERT INTO ingreso_producto values(62,2,4,3000,12000,4500,'2022-02-22',1,'Topo Estrella',1);
+INSERT INTO ingreso_producto values(63,2,4,3000,12000,4500,'2022-02-22',2,'Topo Serpiente Color2',1);
+INSERT INTO ingreso_producto values(64,2,4,8000,32000,12000,'2022-02-22',2,'Topo Flor',1);
+INSERT INTO ingreso_producto values(65,5,4,12000,48000,18000,'2022-02-22',2,'Duo de tobillera',5);
+INSERT INTO ingreso_producto values(66,6,4,11000,44000,16500,'2022-04-28',1,'Cadena con dije de rayo',5);
+INSERT INTO ingreso_producto values(67,6,4,12000,48000,18000,'2022-04-28',1,'Gargantilla Sencilla',1);
+INSERT INTO ingreso_producto values(68,1,4,8000,32000,12000,'2022-04-28',1,'Candonga Lisas Pequeñas',7);
+INSERT INTO ingreso_producto values(69,7,4,10000,40000,15000,'2022-04-28',1,'Con perlas',1);
+INSERT INTO ingreso_producto values(70,7,4,9500,38000,14250,'2022-04-28',1,'Con flores',1);
+INSERT INTO ingreso_producto values(71,5,4,7500,30000,11250,'2022-04-28',2,'Flores blancas',5);
+INSERT INTO ingreso_producto values(72,2,4,5500,22000,8250,'2022-04-28',2,'Mini cruces',1);
+INSERT INTO ingreso_producto values(73,4,4,9000,36000,13500,'2022-04-28',2,'Hilo sencillo',1);
+INSERT INTO ingreso_producto values(74,1,4,6000,24000,9000,'2022-04-28',2, 'Lisas 2 cm',1);
+INSERT INTO ingreso_producto values(75,2,4,8500,34000,12750,'2022-04-28',1,'Mini rayos',1);
+
+-- cliente
+
+INSERT INTO cliente values(1000468927,'Ana Sofia Gutierrez','Cra 114 N82-10','3112863910','2003-06-14',3,2);
+INSERT INTO cliente values(28733186,'Angela Rojas','Cll 29a Sur #39a-04','3146722345','1975-10-12',3,3);
+INSERT INTO cliente values(1000590669,'Camila Muñoz','Cra 114 N82-20','3008549904','2002-11-29',10,2);
+INSERT INTO cliente values(1018789607,'Camila Ramirez' ,'Cra. 112a #No. 75 C - 28','3226701809','2000-09-03',3,2);
+INSERT INTO cliente values(56857093,'Carolina Ardila','Cra 112 bis N77c-32','3132678665','1982-10-12',3,3);
+INSERT INTO cliente values(20461523,'Catalina Arevalo','Ac. 24 #84-66','3128499076','1984-11-26',3,3);
+INSERT INTO cliente values(1022371127,'Diana Carolina Gonzalez','Cra. 96 #76-87','3156408987','1995-03-05',3,2);
+INSERT INTO cliente values(1033750192,'Diana Reyes','Cra. 91a Bis # 76 a 09','3124504072','2002-05-14',3,2);
+INSERT INTO cliente values(1012365091,'Erika Bautista','Cl. 79 #119-95','3136547870','1992-07-04',3,3);
+INSERT INTO cliente values(1022422308,'Erika Burgos','Cl. 23d #85b-55','3159804541','1997-04-04',3,1);
+INSERT INTO cliente values(1002789789,'Flor Sarmiento','Cl. 95 #71-45','3016554730','2001-11-17',3,2);
+INSERT INTO cliente values(1002125616,'Isabella Castro','Cl. 13 #43e-48','3172501424','2001-01-17',10,2);
+INSERT INTO cliente values(1007476066,'Isabella Paez','Dg. 77b #120a - 45','3215174248','2004-01-06',3,2);
+INSERT INTO cliente values(1000786062,'Jessica Linares','Cl. 80 #62-84','3166704075','2002-04-30',3,2);
+INSERT INTO cliente values(52470946,'Johana Sanchez','Cl. 24f #85b85','3168504696','1999-02-19',3,3);
+INSERT INTO cliente values(51898023,'July Santos','Cl. 78 #85a-56','3108776548','2003-06-15',3,2);
+INSERT INTO cliente values(1000364365,'Laura Hernandez','Cll 162 #64-95','3224125929','2002-03-19',3,2);
+INSERT INTO cliente values(1089276334,'Laura Lopez','Cra. 110 #78f53','3132456568','1997-03-20',3,1);
+INSERT INTO cliente values(1192713200,'Laura Robles','Cra 106 #90c-36','3142130781','2000-11-07',3,2);
+INSERT INTO cliente values(20941500,'Luz Muñoz','Cra 111a N78b-56','3155063225','1953-01-20',3,3);
+INSERT INTO cliente values(1002574847,'Mafe Naranjo','Cra 62 #165a-88','3006677094','2002-02-21',3,2);
+INSERT INTO cliente values(1024241890,'Marcela Morales','Cll 29a Sur #39a-04','3194862075','1997-05-02',3,3);
+INSERT INTO cliente values(51951078,'Maria Eugenia Morales','Cra. 73a #56a 39','3125864962','1970-09-28',3,3);
+INSERT INTO cliente values(63455895,'Maria Jose Sanchez','Cra. 69 #80-20','3204713432','1986-08-31',3,1);
+INSERT INTO cliente values(52832461,'Mariana Vasquez','Dg. 77b #123a-86','3114646265','1985-08-23',3,2);
+INSERT INTO cliente values(52834006,'Marisol Puentes','Cra 120 #87-78','3156704077','1980-11-03',3,1);
+INSERT INTO cliente values(1018470407,'Martha Guacaneme','Cll 2 N 13 - 156','3118367878','1992-02-06',2,3);
+INSERT INTO cliente values(52645392,'Martha Ligia Blanco','Cl. 95 #71-87','3008907623','1981-02-28',3,2);
+INSERT INTO cliente values(1024561761,'Mayerly Pinzon','Cra. 53 #80-242','3136704017','2002-07-25',2,2);
+INSERT INTO cliente values(1090490743,'Miriam Suarez Suarez','Cl. 98 #68-63','3107453021','1989-07-04',3,1);
+INSERT INTO cliente values(1000778975,'Nicole Ariza','Cl. 32 #25-60','3145601216','2003-08-16',4,2);
+INSERT INTO cliente values(1001543523,'Sara Molano','Cl. 97 #70-89','3045635781','2002-09-13',3,3);
+INSERT INTO cliente values(1000268099,'Sara Villalobos','Cra 14c N127-78','3126704890','2004-05-28',10,2);
+INSERT INTO cliente values(1000940849,'Sofia Arce','Cra 118 N83-45','3004807842','2003-06-12',3,2);
+INSERT INTO cliente values(1000705335,'Sofia Torres','Cra. 73 #163-21','3123066163','2003-06-16',3,2);
+INSERT INTO cliente values(1007558002,'Valentina Herrera','Cra 2 #7-37' ,'3208189663','2002-10-31',3,2);
+INSERT INTO cliente values(1000788089,'Valeria Cardenas','Cl. 89 #94p-41','3112454670','1995-10-09',3,2);
+INSERT INTO cliente values(1106893541,'Vanessa Agudelo','Cra. 99b #77a-21','3016507853','2000-12-22',3,3);
+INSERT INTO cliente values(1019136338,'Veronica Almeida','Cl. 63 #73A31','3193410215','1993-06-23',3,3);
+INSERT INTO cliente values(52765286,'Yolanda Beltran','Cl. 81 #91-67','3208907558','1975-04-12',3,2);
+
+--Facturas
+
+INSERT INTO factura values(1,1,1007558002,1,20000,12000,'2020-08-01');
+INSERT INTO factura values(2,4,1007558002,1,13750,12000,'2020-08-01');
+INSERT INTO factura values(3,1,52645392,1,20000,6000,'2020-08-09');
+INSERT INTO factura values(4,5,52645392,1,12250,6000,'2020-08-09');
+INSERT INTO factura values(5,3,1089276334,1,13500,11000,'2020-08-12');
+INSERT INTO factura values(6,5,1024241890,1,13500,6000,'2020-08-20');
+INSERT INTO factura values(7,3,1018470407,1,13500,6000,'2020-09-01');
+INSERT INTO factura values(8,8,1106893541,1,18750,6000,'2020-10-31');
+INSERT INTO factura values(9,9,1018789607,1,15000,7500,'2020-10-31');
+INSERT INTO factura values(10,11,1012365091,1,12000,0,'2020-11-09');
+INSERT INTO factura values(11,12,1007476066,1,12000,6000,'2020-11-20');
+INSERT INTO factura values(12,13,1000705335,1,15000,5000,'2020-11-28');
+INSERT INTO factura values(13,8,1002574847,1,13000,6000,'2020-12-07');
+INSERT INTO factura values(14,17,1002574847,1,12500,6000,'2020-12-07');
+INSERT INTO factura values(15,3,56857093,1,18000,11000,'2020-12-10');
+INSERT INTO factura values(16,16,28733186,2,20000,6000,'2020-12-24');
+INSERT INTO factura values(17,20,1000786062,1,11000,5000,'2021-01-08');
+INSERT INTO factura values(18,18,1002574847,1,12000,5000,'2021-01-08');
+INSERT INTO factura values(19,19,1002574847,1,12000,5000,'2021-01-08');
+INSERT INTO factura values(20,15,1000940849,1,11000,6000,'2021-01-18');
+INSERT INTO factura values(21,2,52832461,1,12500,11000,'2021-02-07');
+INSERT INTO factura values(22,6,52832461,1,10000,11000,'2021-02-07');
+INSERT INTO factura values(23,7,51951078,1,14000,5000,'2021-02-17');
+INSERT INTO factura values(24,10,51951078,1,14500,5000,'2021-02-17');
+INSERT INTO factura values(25,14,1000778975,1,12000,6000,'2021-02-27');
+INSERT INTO factura values(26,25,1002574847,1,7000,0,'2021-03-09');
+INSERT INTO factura values(27,24,1000778975,1,12000,6000,'2021-03-20');
+INSERT INTO factura values(28,20,1000778975,1,12000,6000,'2021-03-20');
+INSERT INTO factura values(29,29,1018470407,1,9000,5000,'2021-04-09');
+INSERT INTO factura values(30,26,52832461,1,5000,6000,'2021-04-09');
+INSERT INTO factura values(31,27,52832461,1,7000,6000,'2021-04-09');
+INSERT INTO factura values(32,26,1012365091,1,8000,11000,'2021-04-20');
+INSERT INTO factura values(33,28,51898023,1,7500,6000,'2021-04-28');
+INSERT INTO factura values(34,30,1000268099,1,14000,6000,'2021-05-08');
+INSERT INTO factura values(35,29,1002574847,1,9000,0,'2021-05-18');
+INSERT INTO factura values(36,31,51951078,1,7500,6000,'2021-05-28');
+INSERT INTO factura values(37,34,51951078,1,7500,6000,'2021-05-28');
+INSERT INTO factura values(38,32,1001543523,1,12000,7500,'2021-06-07');
+INSERT INTO factura values(39,38,1033750192,1,10000,6000,'2021-06-17');
+INSERT INTO factura values(40,36,1002574847,1,18000,6000,'2021-06-27');
+INSERT INTO factura values(41,38,1002574847,1,9000,6000,'2021-06-27');
+INSERT INTO factura values(42,39,20461523,1,18000,6000,'2021-07-07');
+INSERT INTO factura values(43,33,1106893541,1,11000,6000,'2021-07-10');
+INSERT INTO factura values(44,35,52832461,1,12000,6000,'2021-07-27');
+INSERT INTO factura values(45,41,1002125616,1,9000,7500,'2021-08-06');
+INSERT INTO factura values(46,41,1002574847,1,12000,5000,'2021-08-16');
+INSERT INTO factura values(47,42,1002574847,1,12000,5000,'2021-08-16');
+INSERT INTO factura values(48,35,1033750192,1,12000,11000,'2021-08-26');
+INSERT INTO factura values(49,40,1000268099,1,18000,7500,'2021-09-05');
+INSERT INTO factura values(50,44,1106893541,1,7500,6000,'2021-09-15');
+INSERT INTO factura values(51,11,1018470407,1,7000,6000,'2021-09-20');
+INSERT INTO factura values(52,43,1018470407,1,7000,6000,'2021-09-20');
+INSERT INTO factura values(53,45,1024561761,1,7000,0,'2021-09-25');
+INSERT INTO factura values(54,30,1033750192,1,11000,6000,'2021-09-30');
+INSERT INTO factura values(55,45,1033750192,1,10000,6000,'2021-09-30');
+INSERT INTO factura values(56,9,56857093,1,19000,7500,'2021-10-05');
+INSERT INTO factura values(57,10,56857093,1,20000,7500,'2021-10-05');
+INSERT INTO factura values(58,42,52834006,1,14500,6000,'2021-10-10');
+INSERT INTO factura values(59,48,52834006,1,20000,6000,'2021-10-10');
+INSERT INTO factura values(60,47,1000364365,1,12000,6000,'2021-10-15');
+INSERT INTO factura values(61,37,63455895,1,12000,6000,'2021-10-25');
+INSERT INTO factura values(62,25,52832461,1,10500,6000,'2021-11-04');
+INSERT INTO factura values(63,39,1002789789,1,27000,7500,'2021-12-04');
+INSERT INTO factura values(64,64,63455895,1,20000,6000,'2022-04-23');
+INSERT INTO factura values(65,70,63455895,1,16250,6000,'2022-04-23');
+INSERT INTO factura values(66,60,1018470407,1,8500,6000,'2022-05-04');
+INSERT INTO factura values(67,74,1018470407,1,8000,6000,'2022-05-04');
+INSERT INTO factura values(68,50,1022371127,1,12000,6000,'2021-12-14');
+
+-------------------------------------------------
+--Rankeos
+-------------------------------------------------
+
+--Rankeo de clientes con mayor de pedidos
+
+select numero_pedidos.id_cliente, cliente.nombre ,numero_pedidos,rank() over(ORDER BY numero_pedidos DESC)
+from numero_pedidos, cliente
+where numero_pedidos.id_cliente = cliente.id_cliente;
+
+--Rankeo de tipos de producto con mas cantidad en stock
+
+select t.nombre_tipo,count(t.nombre_tipo),rank() over(order by count(t.nombre_tipo) desc)
+from producto p,tipo_producto t
+where t.id_tipo = p.id_tipo
+group by t.nombre_tipo;
+
+--Rankeo de ciudades con mayor cantidad de clientes
+
+select c.nombre_ciudad,count(c.nombre_ciudad),rank() over(order by count(c.nombre_ciudad) desc)
+from cliente cli, ciudad c
+where cli.id_ciudad = c.id_ciudad
+group by c.nombre_ciudad;
+
+-- Rankeo Productos mas vendidos
+
+select f.id_producto, p.diseño_producto,count(f.id_producto),dense_rank() over(order by count(f.id_producto) desc)
+from factura f, producto p
+where f.id_producto = p.id_producto
+group by f.id_producto,p.diseño_producto;
+
+--------------------------------------------------------
+--Consultas
+--------------------------------------------------------
+
+-- Productos con sus ventas
+
+select f.id_producto, p.diseño_producto,count(f.id_producto)
+from factura f, producto p
+where f.id_producto = p.id_producto
+group by f.id_producto,p.diseño_producto;
+
+--Productos con menos unidades
+
+select*
+from producto p 
+where p.existencias <= 2;
+
+--------------------------------------------------------
+--Roles
+--------------------------------------------------------
+
+CREATE ROLE Owner WITH LOGIN PASSWORD 'roseandbrave123'; --crear rol de dueño
+REVOKE CREATE ON SCHEMA public FROM PUBLIC; --ningun permiso a los roles públicos predeterminado
+REVOKE ALL ON DATABASE postgres FROM PUBLIC; --ningun permiso a la base de datos 
+
+--------------------------------------------------------
+--Funciones 
+--------------------------------------------------------
+DROP FUNCTION mayor_comprador();
+
+--Cliente con mas pedidos
+CREATE OR REPLACE FUNCTION mayor_comprador()
+	RETURNS TABLE(
+		nombre varchar,
+		numero_ped integer,
+		ranking bigint)
+AS
+$$
+BEGIN
+	RETURN QUERY
+		(select cliente.nombre ,numero_pedidos,rank() over(ORDER BY numero_pedidos DESC)
+		   from numero_pedidos, cliente
+		   where numero_pedidos.id_cliente = cliente.id_cliente
+		   limit 1);
+END;
+$$
+LANGUAGE plpgsql;
+
+--Producto mas vendido
+
+drop function prod_mas_vendido()
+
+CREATE OR REPLACE FUNCTION prod_mas_vendido()
+	RETURNS TABLE(
+		id_producto integer,
+		numero_ped bigint,
+		ranking bigint)
+AS
+$$
+BEGIN
+	RETURN QUERY
+		(select f.id_producto,count(f.id_producto),dense_rank() over(order by count(f.id_producto) desc)
+		 from factura f, producto p
+		 group by f.id_producto
+		 limit 1);
+END;
+$$
+LANGUAGE plpgsql;
+
